@@ -1,5 +1,64 @@
 BASH_IRODS_REPO_DIR=~/software/irods
 
+IRODS_REPO_ROOT=~/software
+
+irods-build() {
+    pushd $IRODS_REPO_ROOT/irods
+    sudo packaging/build.sh icat postgres
+    popd
+}
+
+irods-clone() {
+    pushd $IRODS_REPO_ROOT
+    sudo rm -rf irods
+    git clone https://github.com/irods/irods.git
+    if [ "$1" != "" ]; then
+        cd irods
+        git checkout $1
+    fi
+    popd
+}
+
+irods-valgrind() {
+    LABEL=$1
+    sudo service irods stop
+    pushd /var/lib/irods/iRODS/server/bin
+    VALGRIND_OUT=/tmp/$LABEL
+    rm -rf $VALGRIND_OUT
+    mkdir $VALGRIND_OUT
+    export PATH=$PATH:`pwd` 
+    valgrind --tool=memcheck --leak-check=full --trace-children=yes --num-callers=200 --time-stamp=yes --log-file=$VALGRIND_OUT/valgrind_out_%p.txt ./irodsServer
+    sleep 30
+    ils
+    r=""
+    SUMM=/tmp/sum
+    echo "" > $SUM
+    for f in $VALGRIND_OUT; do
+        r=`grep regionRegion2Cp $f`
+        if [ "$r" != "" ]; then
+            echo $LABEL failed >> $SUM
+            break
+        fi
+    done
+    if [ "$r" == "" ]; then
+        echo $LABEL succeeded >> $SUM
+    fi
+    popd
+}
+
+irods-bulk-valgrind() {
+    irods-clone $1
+    COMMITS=`git log --pretty=format:%H --max-count=100`
+    i=0
+    for c in $COMMITS; do
+        irods-clone $c
+        irods-build
+        irods-repave-dev
+        irods-valgrind $i-$c
+        i=$((i+1))
+    done
+}
+
 irods-stop-server() {
     sudo su - irods -c "/var/lib/irods/iRODS/irodsctl stop"
 }
